@@ -15,6 +15,7 @@ import {
   extractResponsesReasoningConfig,
   extractResponsesTextConfig,
   isOpenAICodexResponsesModel,
+  isGitHubCopilotResponsesModel,
   looksLikeResponsesPayload,
   messageMatchesModel,
   modelKey,
@@ -214,7 +215,7 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
       }
     }
     const headers = Object.fromEntries(mergedHeaders);
-    // Use Pi's resolved request headers and endpoint.
+    // OAuth resolves different Copilot endpoints for individual/business/enterprise accounts.
     const requestModel = { ...model, headers, baseUrl: auth.baseUrl ?? model.baseUrl };
 
     const tools = buildToolsPayload(pi.getAllTools(), pi.getActiveTools());
@@ -262,15 +263,14 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
       }),
     ]);
 
+    if (event.signal.aborted) return undefined;
+
     if (remoteResult.status !== "fulfilled") {
-      if (localResult.status === "fulfilled") {
-        return { compaction: localResult.value };
-      }
-      if (!event.signal.aborted && ctx.hasUI) {
+      if (ctx.hasUI) {
         const message = remoteResult.reason instanceof Error ? remoteResult.reason.message : String(remoteResult.reason);
-        ctx.ui.notify(`OpenAI remote compaction failed; falling back to default compaction. ${message}`, "warning");
+        ctx.ui.notify(`Remote compaction failed for ${model.provider}/${model.id}; falling back to text compaction. ${message}`, "warning");
       }
-      return undefined;
+      return localResult.status === "fulfilled" ? { compaction: localResult.value } : undefined;
     }
 
     const remoteDetails = buildRemoteCompactionDetails(
@@ -340,7 +340,7 @@ export default function openaiServerCompactionExtension(pi: ExtensionAPI) {
     });
     const remoteState = getMatchingRemoteState(sessionId, model);
 
-    if (isOpenAICodexResponsesModel(model)) {
+    if (isOpenAICodexResponsesModel(model) || isGitHubCopilotResponsesModel(model)) {
       if (!remoteState) return undefined;
       const payload = applyRemoteHistoryPayloadPatch({
         payload: event.payload,
